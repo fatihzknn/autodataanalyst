@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from core.loader import load_csv
+from core.loader import  load_file
 from core.missing import missing_summary
 
 from core.viz import plot_hist, plot_box, plot_bar_topk
@@ -14,25 +14,38 @@ from core.insights_rules import generate_insights
 st.set_page_config(page_title="AutoDataAnalyst", layout="wide")
 st.title("AutoDataAnalyst")
 
-uploaded = st.file_uploader("CSV yükle", type=["csv"])
+uploaded = st.file_uploader(
+    "Upload data file",
+    type=["csv", "xlsx", "xls"]
+)
+
 if uploaded is None:
-    st.info("Bir CSV yükle.")
+    st.info("Bir dosya yükle.(CSV, XLSX)")
     st.stop()
 
-# CSV Settings (BA: data ingestion risks)
-st.sidebar.header("CSV Settings")
-sep = st.sidebar.selectbox("Separator", [",", ";", "\t", "|"], index=0)
-encoding = st.sidebar.selectbox("Encoding", ["utf-8", "latin-1", "cp1252"], index=0)
+is_csv = uploaded.name.lower().endswith(".csv")
+
+is_csv = uploaded.name.lower().endswith(".csv")
+
+if is_csv:
+    st.sidebar.header("CSV Settings")
+    sep = st.sidebar.selectbox("Separator", [",", ";", "\t", "|"], index=0)
+    encoding = st.sidebar.selectbox("Encoding", ["utf-8", "latin-1", "cp1252"], index=0)
+else:
+    sep = None
+    encoding = None
+
+
 
 # Cache: aynı dosya + aynı ayarlar ile tekrar hesaplama yapmasın
 @st.cache_data(show_spinner=False)
 def load_df(file, sep, encoding):
-    return load_csv(file, sep=sep, encoding=encoding)
+    return load_file(file, sep=sep, encoding=encoding)
 
 try:
     df = load_df(uploaded, sep, encoding)
 except Exception as e:
-    st.error("CSV okunamadı. Separator/encoding ayarlarını değiştir.")
+    st.error("Dosya okunamadı. Separator/encoding ayarlarını değiştir.")
     st.code(str(e))
     st.stop()
 
