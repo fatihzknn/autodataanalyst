@@ -74,3 +74,64 @@ DATASET SUMMARY
         return resp.choices[0].message.content
 
     raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
+
+
+def generate_cleaning_plan(context:str) -> str:
+    """
+    Generates a data cleaning plan from the given EDA context.
+    """
+    provider = get_provider()
+
+    if provider == "groq":
+        from groq import Groq
+
+        client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+        prompt = f"""
+
+ROLE
+You are a senior data analyst writing a data cleaning plan.
+
+NON-NEGOTIABLE RULES
+- Use ONLY the information inside DATASET SUMMARY.
+- Do NOT invent business context or assumptions.
+- Do NOT claim causation from correlation. State "association" not "causes".
+- If a variable looks ordinal or coded (examples: class, level, tier, grade, score, id), do NOT assume direction or meaning unless explicitly described in the summary.
+- If you lack evidence for a statement, write "Unknown from provided summary".
+
+OUTPUT FORMAT (STRICT)
+Return exactly the sections below with bullet points. No extra sections.
+
+1) Data quality issues to address
+- List all issues found in the dataset summary (missingness, duplicates, high cardinality).
+- Each bullet must cite evidence tags if available.
+
+2) Cleaning actions to take
+- For each issue identified:
+  - Suggest specific cleaning steps (e.g., drop columns with >40% missingness).
+  - Include rationale for each step.
+  - Mention any potential risks or side effects.
+
+3) Recommended next steps
+- Suggest actions based on what is present:
+  - If timestamps exist: suggest resampling or time-based filtering.
+  - If target/label exists: suggest baseline model and stratified split.
+  - If many categoricals: suggest encoding strategy and cardinality handling.
+  - If strong outliers: suggest robust scaling or winsorization.
+
+DATASET SUMMARY
+{context}
+""".strip()
+
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are precise, cautious, and evidence-driven."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
+        )
+        return resp.choices[0].message.content
+
+    raise ValueError(f"Unsupported LLM_PROVIDER: {provider}")
