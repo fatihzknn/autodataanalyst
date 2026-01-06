@@ -1,5 +1,9 @@
-from core.llm import generate_analyst_summary
+from dotenv import load_dotenv
+load_dotenv()
+from core.llm import generate_analyst_summary,generate_cleaning_plan
 from core.llm_context import build_llm_context
+from core.quality import quality_report, quality_score
+
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -13,8 +17,7 @@ from core.correlation import compute_corr, top_correlations
 from core.viz import plot_corr_heatmap
 from core.insights_rules import generate_insights
 
-from dotenv import load_dotenv
-load_dotenv()
+
 
 
 st.set_page_config(page_title="AutoDataAnalyst", layout="wide")
@@ -63,8 +66,9 @@ show_dist = st.sidebar.checkbox("Distributions")
 show_outliers = st.sidebar.checkbox("Outliers")
 show_corr = st.sidebar.checkbox("Correlation")
 show_insights = st.sidebar.checkbox("Insights (Rule-based)")
-
 use_llm = st.sidebar.checkbox("Enable LLM insights")
+show_quality = st.sidebar.checkbox("Data Quality Advisor")
+use_llm_cleaning = st.sidebar.checkbox("LLM: Generate cleaning plan")
 
 
 
@@ -187,3 +191,75 @@ if use_llm:
 
     summary = generate_analyst_summary(context)
     st.markdown(summary)
+
+if show_quality:
+    st.subheader("Data Quality Advisor")
+
+    qr = quality_report(df)
+    qs = quality_score(qr)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Quality Score", qs)
+    c2.metric("Missing Cells %", f"{qr['missing_cell_pct']:.2f}%")
+    c3.metric("Duplicate Rows %", f"{qr['duplicate_row_pct']:.2f}%")
+    c4.metric("Cols >40% Missing", qr["cols_missing_over_40"])
+
+    # Issues summary table (deterministic)
+    issues_rows = []
+
+    if qr["missing_cell_pct"] > 10:
+        issues_rows.append({
+            "issue": "High overall missingness",
+            "evidence": f"missing_cell_pct={qr['missing_cell_pct']:.2f}%"
+        })
+
+    if qr["cols_missing_over_20"] > 0:
+        issues_rows.append({
+            "issue": "Columns with >20% missing",
+            "evidence": f"count={qr['cols_missing_over_20']}"
+        })
+
+    if qr["duplicate_rows"] > 0:
+        issues_rows.append({
+            "issue": "Duplicate rows present",
+            "evidence": f"duplicate_rows={qr['duplicate_rows']} ({qr['duplicate_row_pct']:.2f}%)"
+        })
+
+    if len(qr["high_cardinality_cols"]) > 0:
+        issues_rows.append({
+            "issue": "High-cardinality categorical columns",
+            "evidence": ", ".join(qr["high_cardinality_cols"])
+        })
+
+    issues_df = pd.DataFrame(issues_rows) if issues_rows else pd.DataFrame(
+        [{"issue": "No major issues detected by heuristics", "evidence": "N/A"}]
+    )
+    st.dataframe(issues_df, width="stretch")
+
+    # Show top missing columns
+    st.markdown("**Top missing columns (pct)**")
+    top_missing_df = (
+        pd.DataFrame(list(qr["top_missing_columns"].items()), columns=["column", "missing_pct"])
+        .sort_values("missing_pct", ascending=False)
+    )
+    st.dataframe(top_missing_df, width="stretch")
+
+    # Optional: LLM cleaning plan (guarded)
+    if use_llm_cleaning:
+        # Build a CLEANING context, not the whole EDA context.
+        cleaning_context = f"""
+Quality Report:
+rows={qr['rows']}, cols={qr['cols']}
+missing_cell_pct={qr['missing_cell_pct']:.2f}%
+cols_missing_over_40={qr['cols_missing_over_40']}
+cols_missing_over_20={qr['cols_missing_over_20']}
+duplicate_rows={qr['duplicate_rows']} ({qr['duplicate_row_pct']:.2f}%)
+high_cardinality_cols={qr['high_cardinality_cols']}
+
+Top missing columns (pct):
+{top_missing_df.to_string(index=False)}
+""".strip()
+
+        with st.spinner("Generating cleaning plan..."):
+            plan = generate_cleaning_plan(cleaning_context)
+        st.markdown(plan)
