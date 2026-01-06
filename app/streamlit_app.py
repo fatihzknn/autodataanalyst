@@ -1,23 +1,22 @@
+import os
 from dotenv import load_dotenv
 load_dotenv()
-from core.llm import generate_analyst_summary,generate_cleaning_plan
-from core.llm_context import build_llm_context
-from core.quality import quality_report, quality_score
 
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from core.loader import  load_file
+from core.llm import generate_analyst_summary, generate_cleaning_plan
+from core.llm_context import build_llm_context
+from core.quality import quality_report, quality_score
+
+from core.loader import load_file
 from core.missing import missing_summary
 
-from core.viz import plot_hist, plot_box, plot_bar_topk
+from core.viz import plot_hist, plot_box, plot_bar_topk, plot_corr_heatmap
 from core.outliers import top_outlier_columns, iqr_outliers_count
 from core.correlation import compute_corr, top_correlations
-from core.viz import plot_corr_heatmap
 from core.insights_rules import generate_insights
-
-
 
 
 st.set_page_config(page_title="AutoDataAnalyst", layout="wide")
@@ -29,7 +28,7 @@ uploaded = st.file_uploader(
 )
 
 if uploaded is None:
-    st.info("Bir dosya yükle.(CSV, XLSX)")
+    st.info("Bir dosya yükle. (CSV, XLSX)")
     st.stop()
 
 is_csv = uploaded.name.lower().endswith(".csv")
@@ -43,11 +42,10 @@ else:
     encoding = None
 
 
-
-# Cache: aynı dosya + aynı ayarlar ile tekrar hesaplama yapmasın
 @st.cache_data(show_spinner=False)
 def load_df(file, sep, encoding):
     return load_file(file, sep=sep, encoding=encoding)
+
 
 try:
     df = load_df(uploaded, sep, encoding)
@@ -57,7 +55,7 @@ except Exception as e:
     st.stop()
 
 st.subheader("Preview")
-st.dataframe(df.head(50), use_container_width=True)
+st.dataframe(df.head(50), width="stretch")
 
 st.sidebar.header("Analiz Seçimleri")
 show_overview = st.sidebar.checkbox("Dataset Overview", value=True)
@@ -67,9 +65,30 @@ show_outliers = st.sidebar.checkbox("Outliers")
 show_corr = st.sidebar.checkbox("Correlation")
 show_insights = st.sidebar.checkbox("Insights (Rule-based)")
 use_llm = st.sidebar.checkbox("Enable LLM insights")
-show_quality = st.sidebar.checkbox("Data Quality Advisor")
-use_llm_cleaning = st.sidebar.checkbox("LLM: Generate cleaning plan")
 
+show_quality = st.sidebar.checkbox("Data Quality Advisor")
+use_llm_cleaning = st.sidebar.checkbox("LLM: Generate cleaning plan", disabled=not show_quality)
+
+
+@st.cache_data(show_spinner=False)
+def cached_analyst_summary(context: str) -> str:
+    return generate_analyst_summary(context)
+
+
+@st.cache_data(show_spinner=False)
+def cached_cleaning_plan(cleaning_context: str) -> str:
+    return generate_cleaning_plan(cleaning_context)
+
+
+def require_groq_key():
+    if os.getenv("LLM_PROVIDER", "groq").lower() == "groq" and not os.getenv("GROQ_API_KEY"):
+        st.error("GROQ_API_KEY not found. Please set it via .env or terminal export.")
+        st.stop()
+
+
+# Common columns
+numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+cat_cols = [c for c in df.columns if c not in numeric_cols]
 
 
 if show_overview:
@@ -80,24 +99,22 @@ if show_overview:
     c3.metric("Missing Cells", int(df.isna().sum().sum()))
     st.write(df.dtypes.astype(str))
 
+
 if show_missing:
     st.subheader("Missing Values")
     ms = missing_summary(df)
-    st.dataframe(ms.head(10), use_container_width=True)
+    st.dataframe(ms.head(10), width="stretch")
 
-    # Bar chart: top 10 missing %
-    top = ms.head(10).iloc[::-1]  # ters çevir ki grafikte yukarı doğru gitsin
+    top = ms.head(10).iloc[::-1]
     fig, ax = plt.subplots()
     ax.barh(top.index.astype(str), top["missing_pct"])
     ax.set_xlabel("Missing %")
     ax.set_ylabel("Column")
-    st.pyplot(fig, use_container_width=True)
-numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
-cat_cols = [c for c in df.columns if c not in numeric_cols]
+    st.pyplot(fig, width="stretch")
+
 
 if show_dist:
     st.subheader("Distributions")
-
     dist_type = st.radio("Column type", ["Numeric", "Categorical"], horizontal=True)
 
     if dist_type == "Numeric":
@@ -107,9 +124,9 @@ if show_dist:
             col = st.selectbox("Select numeric column", numeric_cols)
             c1, c2 = st.columns(2)
             with c1:
-                st.pyplot(plot_hist(df, col), use_container_width=True)
+                st.pyplot(plot_hist(df, col), width="stretch")
             with c2:
-                st.pyplot(plot_box(df, col), use_container_width=True)
+                st.pyplot(plot_box(df, col), width="stretch")
 
             st.write(df[col].describe())
 
@@ -119,18 +136,19 @@ if show_dist:
         else:
             col = st.selectbox("Select categorical column", cat_cols)
             k = st.slider("Top-K", 5, 30, 10)
-            st.pyplot(plot_bar_topk(df, col, k), use_container_width=True)
+            st.pyplot(plot_bar_topk(df, col, k), width="stretch")
 
             cardinality = df[col].nunique(dropna=True)
             st.metric("Cardinality (unique values)", int(cardinality))
+
+
 if show_outliers:
     st.subheader("Outliers (IQR)")
-
     if not numeric_cols:
         st.warning("Outlier analizi için numeric column yok.")
     else:
         topn = top_outlier_columns(df, numeric_cols, top_n=10)
-        st.dataframe(topn, use_container_width=True)
+        st.dataframe(topn, width="stretch")
 
         col = st.selectbox("Inspect a column", numeric_cols, key="outlier_col")
         stats = iqr_outliers_count(df, col)
@@ -138,15 +156,19 @@ if show_outliers:
         c1.metric("Outliers", stats["outliers"])
         c2.metric("Total (non-null)", stats["total"])
         c3.metric("Outlier %", f"{stats['outlier_pct']:.2f}%")
+
+
 if show_corr:
     st.subheader("Correlation")
     corr = compute_corr(df)
     if corr.empty:
         st.info("Correlation için yeterli numeric column yok.")
     else:
-        st.pyplot(plot_corr_heatmap(corr), use_container_width=True)
+        st.pyplot(plot_corr_heatmap(corr), width="stretch")
         topc = top_correlations(corr, top_n=10)
-        st.dataframe(topc, use_container_width=True)
+        st.dataframe(topc, width="stretch")
+
+
 if show_insights:
     st.subheader("Key Insights")
     corr = compute_corr(df)
@@ -154,31 +176,27 @@ if show_insights:
     insights = generate_insights(df, pairs)
     for i, text in enumerate(insights, 1):
         st.markdown(f"{i}. {text}")
+
+
 if use_llm:
-    # with st.spinner("Generating analyst summary..."):
-    #     context = build_llm_context(...)
-    #     text = generate_analyst_summary(context)
-    #     st.markdown(text)
-    # overview dict
+    require_groq_key()
+    st.subheader("LLM Analyst Summary")
+
     overview = {
         "rows": int(len(df)),
         "cols": int(df.shape[1]),
-        "numeric_cols": int(len(df.select_dtypes(include=["number"]).columns)),
-        "categorical_cols": int(len(df.select_dtypes(exclude=["number"]).columns)),
+        "numeric_cols": int(len(numeric_cols)),
+        "categorical_cols": int(len(cat_cols)),
         "total_missing_cells": int(df.isna().sum().sum()),
     }
 
-    # missing top
     ms = missing_summary(df).head(10)
     missing_top = ms.to_string()
 
-    # correlations top
     corr = compute_corr(df)
     topc = top_correlations(corr, top_n=10) if not corr.empty else None
     top_correlations_txt = topc.to_string(index=False) if topc is not None and not topc.empty else "N/A"
 
-    # outliers top
-    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
     out_top = top_outlier_columns(df, numeric_cols, top_n=10) if numeric_cols else None
     outliers_txt = out_top.to_string(index=False) if out_top is not None and not out_top.empty else "N/A"
 
@@ -189,8 +207,11 @@ if use_llm:
         outliers_top=outliers_txt,
     )
 
-    summary = generate_analyst_summary(context)
+    with st.spinner("Generating analyst summary..."):
+        summary = cached_analyst_summary(context)
+
     st.markdown(summary)
+
 
 if show_quality:
     st.subheader("Data Quality Advisor")
@@ -204,7 +225,6 @@ if show_quality:
     c3.metric("Duplicate Rows %", f"{qr['duplicate_row_pct']:.2f}%")
     c4.metric("Cols >40% Missing", qr["cols_missing_over_40"])
 
-    # Issues summary table (deterministic)
     issues_rows = []
 
     if qr["missing_cell_pct"] > 10:
@@ -236,7 +256,6 @@ if show_quality:
     )
     st.dataframe(issues_df, width="stretch")
 
-    # Show top missing columns
     st.markdown("**Top missing columns (pct)**")
     top_missing_df = (
         pd.DataFrame(list(qr["top_missing_columns"].items()), columns=["column", "missing_pct"])
@@ -244,11 +263,12 @@ if show_quality:
     )
     st.dataframe(top_missing_df, width="stretch")
 
-    # Optional: LLM cleaning plan (guarded)
     if use_llm_cleaning:
-        # Build a CLEANING context, not the whole EDA context.
+        require_groq_key()
+        st.subheader("LLM Cleaning Plan")
+
         cleaning_context = f"""
-Quality Report:
+QUALITY REPORT
 rows={qr['rows']}, cols={qr['cols']}
 missing_cell_pct={qr['missing_cell_pct']:.2f}%
 cols_missing_over_40={qr['cols_missing_over_40']}
@@ -256,10 +276,11 @@ cols_missing_over_20={qr['cols_missing_over_20']}
 duplicate_rows={qr['duplicate_rows']} ({qr['duplicate_row_pct']:.2f}%)
 high_cardinality_cols={qr['high_cardinality_cols']}
 
-Top missing columns (pct):
+TOP MISSING COLUMNS (pct)
 {top_missing_df.to_string(index=False)}
 """.strip()
 
-        with st.spinner("Generating cleaning plan..."):
-            plan = generate_cleaning_plan(cleaning_context)
+        with st.spinner("Generating cleaning plan (LLM)..."):
+            plan = cached_cleaning_plan(cleaning_context)
+
         st.markdown(plan)
