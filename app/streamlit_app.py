@@ -1,3 +1,5 @@
+from core.llm import generate_analyst_summary
+from core.llm_context import build_llm_context
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,6 +13,10 @@ from core.correlation import compute_corr, top_correlations
 from core.viz import plot_corr_heatmap
 from core.insights_rules import generate_insights
 
+from dotenv import load_dotenv
+load_dotenv()
+
+
 st.set_page_config(page_title="AutoDataAnalyst", layout="wide")
 st.title("AutoDataAnalyst")
 
@@ -22,8 +28,6 @@ uploaded = st.file_uploader(
 if uploaded is None:
     st.info("Bir dosya yükle.(CSV, XLSX)")
     st.stop()
-
-is_csv = uploaded.name.lower().endswith(".csv")
 
 is_csv = uploaded.name.lower().endswith(".csv")
 
@@ -59,6 +63,10 @@ show_dist = st.sidebar.checkbox("Distributions")
 show_outliers = st.sidebar.checkbox("Outliers")
 show_corr = st.sidebar.checkbox("Correlation")
 show_insights = st.sidebar.checkbox("Insights (Rule-based)")
+
+use_llm = st.sidebar.checkbox("Enable LLM insights")
+
+
 
 if show_overview:
     st.subheader("Dataset Overview")
@@ -142,3 +150,40 @@ if show_insights:
     insights = generate_insights(df, pairs)
     for i, text in enumerate(insights, 1):
         st.markdown(f"{i}. {text}")
+if use_llm:
+    # with st.spinner("Generating analyst summary..."):
+    #     context = build_llm_context(...)
+    #     text = generate_analyst_summary(context)
+    #     st.markdown(text)
+    # overview dict
+    overview = {
+        "rows": int(len(df)),
+        "cols": int(df.shape[1]),
+        "numeric_cols": int(len(df.select_dtypes(include=["number"]).columns)),
+        "categorical_cols": int(len(df.select_dtypes(exclude=["number"]).columns)),
+        "total_missing_cells": int(df.isna().sum().sum()),
+    }
+
+    # missing top
+    ms = missing_summary(df).head(10)
+    missing_top = ms.to_string()
+
+    # correlations top
+    corr = compute_corr(df)
+    topc = top_correlations(corr, top_n=10) if not corr.empty else None
+    top_correlations_txt = topc.to_string(index=False) if topc is not None and not topc.empty else "N/A"
+
+    # outliers top
+    numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
+    out_top = top_outlier_columns(df, numeric_cols, top_n=10) if numeric_cols else None
+    outliers_txt = out_top.to_string(index=False) if out_top is not None and not out_top.empty else "N/A"
+
+    context = build_llm_context(
+        overview=overview,
+        missing_top=missing_top,
+        top_correlations=top_correlations_txt,
+        outliers_top=outliers_txt,
+    )
+
+    summary = generate_analyst_summary(context)
+    st.markdown(summary)
