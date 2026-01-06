@@ -6,3 +6,5 @@ seaborn
 scikit-learn
 python-dotenv
 openpyxl
+python-dotenv
+groq
