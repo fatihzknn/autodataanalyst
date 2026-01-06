@@ -1,5 +1,7 @@
 import pandas as pd
 import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 def plot_hist(df: pd.DataFrame, col: str):
     s = df[col].dropna()
@@ -25,4 +27,10 @@ def plot_bar_topk(df: pd.DataFrame, col: str, k: int = 10):
     ax.set_title(f"Top {k} values: {col}")
     ax.set_xlabel("Count")
     ax.set_ylabel(col)
+    return fig
+
+def plot_corr_heatmap(corr):
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sns.heatmap(corr, ax=ax, cmap="coolwarm", center=0, square=True)
+    ax.set_title("Correlation Heatmap")
     return fig

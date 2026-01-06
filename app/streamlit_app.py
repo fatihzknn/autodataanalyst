@@ -7,6 +7,9 @@ from core.missing import missing_summary
 
 from core.viz import plot_hist, plot_box, plot_bar_topk
 from core.outliers import top_outlier_columns, iqr_outliers_count
+from core.correlation import compute_corr, top_correlations
+from core.viz import plot_corr_heatmap
+from core.insights_rules import generate_insights
 
 st.set_page_config(page_title="AutoDataAnalyst", layout="wide")
 st.title("AutoDataAnalyst")
@@ -41,6 +44,8 @@ show_overview = st.sidebar.checkbox("Dataset Overview", value=True)
 show_missing = st.sidebar.checkbox("Missing Values")
 show_dist = st.sidebar.checkbox("Distributions")
 show_outliers = st.sidebar.checkbox("Outliers")
+show_corr = st.sidebar.checkbox("Correlation")
+show_insights = st.sidebar.checkbox("Insights (Rule-based)")
 
 if show_overview:
     st.subheader("Dataset Overview")
@@ -108,3 +113,19 @@ if show_outliers:
         c1.metric("Outliers", stats["outliers"])
         c2.metric("Total (non-null)", stats["total"])
         c3.metric("Outlier %", f"{stats['outlier_pct']:.2f}%")
+if show_corr:
+    st.subheader("Correlation")
+    corr = compute_corr(df)
+    if corr.empty:
+        st.info("Correlation için yeterli numeric column yok.")
+    else:
+        st.pyplot(plot_corr_heatmap(corr), use_container_width=True)
+        topc = top_correlations(corr, top_n=10)
+        st.dataframe(topc, use_container_width=True)
+if show_insights:
+    st.subheader("Key Insights")
+    corr = compute_corr(df)
+    pairs = top_correlations(corr, top_n=10) if not corr.empty else pd.DataFrame()
+    insights = generate_insights(df, pairs)
+    for i, text in enumerate(insights, 1):
+        st.markdown(f"{i}. {text}")
