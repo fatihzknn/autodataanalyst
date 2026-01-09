@@ -2,6 +2,9 @@ import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from core.profiling import column_profile
+from app.ui.components.cards import profile_card
+
 from core.missing import missing_summary
 from core.viz import plot_hist, plot_box, plot_bar_topk, plot_corr_heatmap
 from core.outliers import top_outlier_columns, iqr_outliers_count
@@ -9,6 +12,12 @@ from core.correlation import compute_corr, top_correlations
 from core.insights_rules import generate_insights
 
 def render_eda(df: pd.DataFrame, settings: dict):
+    
+    st.subheader("Column Profiling")
+    col = st.selectbox("Select a column to profile", df.columns.tolist(), key="profile_col")
+    profile = column_profile(df, col)
+    profile_card(profile)
+    st.divider()
     numeric_cols = df.select_dtypes(include=["number"]).columns.tolist()
     cat_cols = [c for c in df.columns if c not in numeric_cols]
 
